@@ -1,5 +1,5 @@
 torch>=2.3.0
-datasets==4.0.0
+datasets==3.6.0
 einops==0.8.1
 flash-attn==2.5.8
 fsspec==2025.3.0
