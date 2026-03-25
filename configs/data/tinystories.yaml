@@ -1,7 +1,7 @@
 train: tinystories-train
 valid: tinystories-valid
 tokenizer_name_or_path: llama-10k
-tokenizer_model_path: AR/tokenizer.model
+tokenizer_model_path: tokenizer.model
 vocab_size: 10002
 data_dir: processed/tinystories
 cache_dir: ${kydra:runtime.cwd}/datasets/tinystories

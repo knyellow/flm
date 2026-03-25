@@ -564,7 +564,7 @@ class LlamaReduced10KTokenizer(transformers.PreTrainedTokenizer):
 
     def __init__(
             self,
-            model_path: str = 'AR/tokenizer.model',
+            model_path: str = 'tokenizer.model',
             reduced_vocab_size: int = 10002,
             **kwargs):
         self._llama = _LlamaTokenizer(model_path)
@@ -964,7 +964,10 @@ def get_dataset(dataset_name,
         return dataset
     elif dataset_name in ('tinystories-train', 'tinystories-valid'):
         # Load from local JSONL files in processed/tinystories/
+        import hydra
         data_dir = config.data.get('data_dir', 'processed/tinystories')
+        if not os.path.isabs(data_dir):
+                data_dir = hydra.utils.to_absolute_path(data_dir)
         data_files = {
             'train': os.path.join(data_dir, 'train.jsonl'),
             'validation': os.path.join(data_dir, 'validation.jsonl'),
@@ -1106,7 +1109,7 @@ def get_tokenizer(config):
         tokenizer = Alpha8Tokenizer()
     elif config.data.tokenizer_name_or_path == 'llama-10k':
         tokenizer = LlamaReduced10KTokenizer(
-            model_path=config.data.get('tokenizer_model_path', 'AR/tokenizer.model'),
+            model_path=config.data.get('tokenizer_model_path', 'tokenizer.model'),
             reduced_vocab_size=config.data.get('vocab_size', 10002))
     else:
         tokenizer = transformers.AutoTokenizer.from_pretrained(
