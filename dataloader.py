@@ -23,6 +23,13 @@ import transformers
 from einops import repeat
 import utils
 
+# LLaMA tiktoken tokenizer (from AR.llama.tokenizer)
+import sys as _sys
+_ar_root = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _ar_root not in _sys.path:
+    _sys.path.insert(0, _ar_root)
+from AR.llama.tokenizer import Tokenizer as _LlamaTokenizer
+
 LOGGER = utils.get_logger(__name__)
 
 
@@ -544,6 +551,128 @@ class Alpha8Tokenizer(transformers.PreTrainedTokenizer):
     def get_vocab(self) -> typing.Dict[str, int]:
         return self._vocab_str_to_int
 
+# New Llama Tokenizer
+class LlamaReduced10KTokenizer(transformers.PreTrainedTokenizer):
+    """LLaMA tokenizer with a reduced 10 001-token vocabulary.
+
+    Token layout:
+      0 .. base_vocab_size-1  normal subword tokens
+      base_vocab_size         BOS  (10000)
+      base_vocab_size + 1     EOS  (10001)
+      base_vocab_size + 2     UNK  (10002) - unknown tokens
+    """
+
+    def __init__(
+            self,
+            model_path: str = 'AR/tokenizer.model',
+            reduced_vocab_size: int = 10002,
+            **kwargs):
+        self._llama = _LlamaTokenizer(model_path)
+        self._reduced_vocab_size = reduced_vocab_size
+        self._base_vocab_size = reduced_vocab_size - 3   # 9999
+        self._bos_id = self._base_vocab_size              # 10000
+        self._eos_id = self._base_vocab_size + 1          # 10001
+        self._unk_id = self._base_vocab_size + 2          # 10002
+
+        # Build reverse lookup (id -> str) for base tokens only
+        self._id_to_piece: typing.Dict[int, str] = {}
+        for piece, idx in self._llama.model._mergeable_ranks.items():
+            if idx < self._base_vocab_size:
+                self._id_to_piece[idx] = piece.decode('utf-8', errors='replace')
+
+        super().__init__(
+            bos_token='<s>',
+            eos_token='</s>',
+            unk_token='<unk>',
+            pad_token='</s>',
+            **kwargs)
+
+    @property
+    def vocab_size(self) -> int:
+        return self._reduced_vocab_size
+
+    def get_vocab(self) -> typing.Dict[str, int]:
+        vocab = {v: k for k, v in self._id_to_piece.items()}
+        vocab['<s>'] = self._bos_id
+        vocab['</s>'] = self._eos_id
+        vocab['<unk>'] = self._unk_id
+        return vocab
+
+    def _tokenize(self, text: str, **kwargs) -> typing.List[str]:
+        ids = self._llama.encode(text, bos=False, eos=False)
+        tokens = []
+        for i in ids:
+            if i < self._base_vocab_size:
+                tokens.append(self._id_to_piece.get(i, '<unk>'))
+            else:
+                tokens.append('<unk>')
+        return tokens
+
+    def _convert_token_to_id(self, token: str) -> int:
+        if token == '<s>':
+            return self._bos_id
+        if token == '</s>':
+            return self._eos_id
+        if token == '<unk>':
+            return self._unk_id
+        # Reverse lookup
+        for idx, piece in self._id_to_piece.items():
+            if piece == token:
+                return idx
+        return self._unk_id
+
+    def _convert_id_to_token(self, index: int) -> str:
+        if index == self._bos_id:
+            return '<s>'
+        if index == self._eos_id:
+            return '</s>'
+        if index == self._unk_id:
+            return '<unk>'
+        return self._id_to_piece.get(index, '<unk>')
+
+    def convert_tokens_to_string(self, tokens: typing.List[str]) -> str:
+        return ''.join(tokens)
+
+    # encode & decode FLM pipeline
+    def encode(self, text, add_special_tokens=True, **kwargs):
+        """Override for speed: go straight through tiktoken."""
+        ids = self._llama.encode(text, bos=False, eos=False)
+        reduced = [
+            i if i < self._base_vocab_size else self._unk_id
+            for i in ids
+        ]
+        if add_special_tokens:
+            reduced = [self._bos_id] + reduced + [self._eos_id]
+        return reduced
+
+    def decode(self, token_ids, skip_special_tokens=True, **kwargs):
+        if isinstance(token_ids, torch.Tensor):
+            token_ids = token_ids.tolist()
+        special = {self._bos_id, self._eos_id, self._unk_id}
+        if skip_special_tokens:
+            cleaned = [i for i in token_ids if i not in special and 0 <= i < self._base_vocab_size]
+        else:
+            cleaned = [i for i in token_ids if 0 <= i < self._base_vocab_size]
+        return self._llama.decode(cleaned)
+
+    def batch_decode(self, sequences, **kwargs):
+        return [self.decode(seq, **kwargs) for seq in sequences]
+
+    @property
+    def bos_token_id(self):
+        return self._bos_id
+
+    @property
+    def eos_token_id(self):
+        return self._eos_id
+
+    @property
+    def pad_token_id(self):
+        return self._eos_id
+
+    @property
+    def unk_token_id(self):
+        return self._unk_id
 
 def get_pseudo_dataloader(config, tokenizer, model):
     dataset = PseudoDataset(config, model)
@@ -833,6 +962,18 @@ def get_dataset(dataset_name,
     elif dataset_name == 'reflow-dataset':
         dataset = ReflowDataset(config)
         return dataset
+    elif dataset_name in ('tinystories-train', 'tinystories-valid'):
+        # Load from local JSONL files in processed/tinystories/
+        data_dir = config.data.get('data_dir', 'processed/tinystories')
+        data_files = {
+            'train': os.path.join(data_dir, 'train.jsonl'),
+            'validation': os.path.join(data_dir, 'validation.jsonl'),
+        }
+        dataset = datasets.load_dataset(
+            'json',
+            data_files=data_files,
+            cache_dir=cache_dir,
+            streaming=streaming)
     else:
         dataset = datasets.load_dataset(
             dataset_name,
@@ -963,6 +1104,10 @@ def get_tokenizer(config):
         tokenizer = SyntheticTokenizer(vocab_size=config.data.vocab_size+2)
     elif config.data.tokenizer_name_or_path in ['alpha8', 'synthetic-alpha8']:
         tokenizer = Alpha8Tokenizer()
+    elif config.data.tokenizer_name_or_path == 'llama-10k':
+        tokenizer = LlamaReduced10KTokenizer(
+            model_path=config.data.get('tokenizer_model_path', 'AR/tokenizer.model'),
+            reduced_vocab_size=config.data.get('vocab_size', 10002))
     else:
         tokenizer = transformers.AutoTokenizer.from_pretrained(
             config.data.tokenizer_name_or_path)
