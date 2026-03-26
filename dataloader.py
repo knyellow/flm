@@ -568,7 +568,7 @@ class LlamaReduced10KTokenizer(transformers.PreTrainedTokenizer):
     def __init__(
             self,
             model_path: str = 'tokenizer.model',
-            reduced_vocab_size: int = 10002,
+            reduced_vocab_size: int = 10004,
             vocab_map_path: typing.Optional[str] = None,
             **kwargs):
         self._llama = _LlamaTokenizer(model_path)
@@ -618,6 +618,9 @@ class LlamaReduced10KTokenizer(transformers.PreTrainedTokenizer):
 
     @property
     def vocab_size(self) -> int:
+        return self._reduced_vocab_size
+
+    def __len__(self) -> int:
         return self._reduced_vocab_size
 
     def get_vocab(self) -> typing.Dict[str, int]:
@@ -1177,7 +1180,7 @@ def get_tokenizer(config):
             vocab_map_path = hydra.utils.to_absolute_path(vocab_map_path)
         tokenizer = LlamaReduced10KTokenizer(
             model_path=model_path,
-            reduced_vocab_size=config.data.get('vocab_size', 10002),
+            reduced_vocab_size=config.data.get('vocab_size', 10004),
             vocab_map_path=vocab_map_path)
     else:
         tokenizer = transformers.AutoTokenizer.from_pretrained(

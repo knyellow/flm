@@ -76,7 +76,11 @@ class TrainerBase(L.LightningModule):
             self.loss_type = config.algo.loss_type
         self.tokenizer = tokenizer
         if vocab_size is None:
-            self.vocab_size = len(self.tokenizer)
+            #self.vocab_size = len(self.tokenizer)
+            tokenizer_vocab_size = getattr(self.tokenizer, 'vocab_size', None)
+            if tokenizer_vocab_size is None:
+                tokenizer_vocab_size = len(self.tokenizer)
+            self.vocab_size = tokenizer_vocab_size
         else:
             self.vocab_size = vocab_size
         self.sampler = self.config.sampling.predictor
