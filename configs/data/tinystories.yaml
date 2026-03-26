@@ -2,7 +2,8 @@ train: tinystories-train
 valid: tinystories-valid
 tokenizer_name_or_path: llama-10k
 tokenizer_model_path: tokenizer.model
-vocab_size: 10002
+tokenizer_vocab_map_path: AR/llama/vocab_map.json
+vocab_size: 10004
 data_dir: processed/tinystories
 cache_dir: ${kydra:runtime.cwd}/datasets/tinystories
 wrap: True

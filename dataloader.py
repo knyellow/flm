@@ -553,32 +553,61 @@ class Alpha8Tokenizer(transformers.PreTrainedTokenizer):
 
 # New Llama Tokenizer
 class LlamaReduced10KTokenizer(transformers.PreTrainedTokenizer):
-    """LLaMA tokenizer with a reduced 10 001-token vocabulary.
+    """LLaMA tokenizer with a reduced vocabulary.
 
     Token layout:
       0 .. base_vocab_size-1  normal subword tokens
-      base_vocab_size         BOS  (10000)
-      base_vocab_size + 1     EOS  (10001)
-      base_vocab_size + 2     UNK  (10002) - unknown tokens
+      base_vocab_size         BOS
+      base_vocab_size + 1     EOS
+      base_vocab_size + 2     UNK
+
+    If ``vocab_map_path`` is set, base tokens use the compact ids defined in
+    ``AR/llama/build_vocab.py`` output instead of the legacy ``id < K`` cutoff.
     """
 
     def __init__(
             self,
             model_path: str = 'tokenizer.model',
             reduced_vocab_size: int = 10002,
+            vocab_map_path: typing.Optional[str] = None,
             **kwargs):
         self._llama = _LlamaTokenizer(model_path)
         self._reduced_vocab_size = reduced_vocab_size
-        self._base_vocab_size = reduced_vocab_size - 3   # 9999
-        self._bos_id = self._base_vocab_size              # 10000
-        self._eos_id = self._base_vocab_size + 1          # 10001
-        self._unk_id = self._base_vocab_size + 2          # 10002
+        self._base_vocab_size = reduced_vocab_size - 3
+        self._bos_id = self._base_vocab_size
+        self._eos_id = self._base_vocab_size + 1
+        self._unk_id = self._base_vocab_size + 2
+        self._use_vocab_map = vocab_map_path is not None
 
-        # Build reverse lookup (id -> str) for base tokens only
-        self._id_to_piece: typing.Dict[int, str] = {}
-        for piece, idx in self._llama.model._mergeable_ranks.items():
-            if idx < self._base_vocab_size:
-                self._id_to_piece[idx] = piece.decode('utf-8', errors='replace')
+        raw_piece_map = {
+            idx: piece.decode('utf-8', errors='replace')
+            for piece, idx in self._llama.model._mergeable_ranks.items()
+        }
+
+        if self._use_vocab_map:
+            with open(vocab_map_path, 'r', encoding='utf-8') as f:
+                old_to_new = {int(k): int(v) for k, v in json.load(f).items()}
+            if len(old_to_new) > self._base_vocab_size:
+                raise ValueError(
+                    'vocab_map has more entries than reduced_vocab_size allows: '
+                    f'{len(old_to_new)} > {self._base_vocab_size}')
+            self._old_to_new = old_to_new
+            self._new_to_old = {new: old for old, new in old_to_new.items()}
+            self._id_to_piece = {
+                new: raw_piece_map[old]
+                for new, old in self._new_to_old.items()
+                if old in raw_piece_map
+            }
+        else:
+            self._old_to_new = {}
+            self._new_to_old = {}
+            self._id_to_piece = {
+                idx: piece for idx, piece in raw_piece_map.items()
+                if idx < self._base_vocab_size
+            }
+        self._piece_to_id = {
+            piece: idx for idx, piece in self._id_to_piece.items()
+        }
 
         super().__init__(
             bos_token='<s>',
@@ -601,11 +630,18 @@ class LlamaReduced10KTokenizer(transformers.PreTrainedTokenizer):
     def _tokenize(self, text: str, **kwargs) -> typing.List[str]:
         ids = self._llama.encode(text, bos=False, eos=False)
         tokens = []
-        for i in ids:
-            if i < self._base_vocab_size:
-                tokens.append(self._id_to_piece.get(i, '<unk>'))
+        for old_id in ids:
+            if self._use_vocab_map:
+                new_id = self._old_to_new.get(old_id)
+                if new_id is not None:
+                    tokens.append(self._id_to_piece.get(new_id, '<unk>'))
+                else:
+                    tokens.append('<unk>')
             else:
-                tokens.append('<unk>')
+                if old_id < self._base_vocab_size:
+                    tokens.append(self._id_to_piece.get(old_id, '<unk>'))
+                else:
+                    tokens.append('<unk>')
         return tokens
 
     def _convert_token_to_id(self, token: str) -> int:
@@ -615,11 +651,7 @@ class LlamaReduced10KTokenizer(transformers.PreTrainedTokenizer):
             return self._eos_id
         if token == '<unk>':
             return self._unk_id
-        # Reverse lookup
-        for idx, piece in self._id_to_piece.items():
-            if piece == token:
-                return idx
-        return self._unk_id
+        return self._piece_to_id.get(token, self._unk_id)
 
     def _convert_id_to_token(self, index: int) -> str:
         if index == self._bos_id:
@@ -635,12 +667,17 @@ class LlamaReduced10KTokenizer(transformers.PreTrainedTokenizer):
 
     # encode & decode FLM pipeline
     def encode(self, text, add_special_tokens=True, **kwargs):
-        """Override for speed: go straight through tiktoken."""
         ids = self._llama.encode(text, bos=False, eos=False)
-        reduced = [
-            i if i < self._base_vocab_size else self._unk_id
-            for i in ids
-        ]
+        if self._use_vocab_map:
+            reduced = [
+                self._old_to_new.get(old_id, self._unk_id)
+                for old_id in ids
+            ]
+        else:
+            reduced = [
+                old_id if old_id < self._base_vocab_size else self._unk_id
+                for old_id in ids
+            ]
         if add_special_tokens:
             reduced = [self._bos_id] + reduced + [self._eos_id]
         return reduced
@@ -649,10 +686,24 @@ class LlamaReduced10KTokenizer(transformers.PreTrainedTokenizer):
         if isinstance(token_ids, torch.Tensor):
             token_ids = token_ids.tolist()
         special = {self._bos_id, self._eos_id, self._unk_id}
-        if skip_special_tokens:
-            cleaned = [i for i in token_ids if i not in special and 0 <= i < self._base_vocab_size]
+        if self._use_vocab_map:
+            if skip_special_tokens:
+                cleaned = [
+                    self._new_to_old[i]
+                    for i in token_ids
+                    if i not in special and i in self._new_to_old
+                ]
+            else:
+                cleaned = [
+                    self._new_to_old[i]
+                    for i in token_ids
+                    if i in self._new_to_old
+                ]
         else:
-            cleaned = [i for i in token_ids if 0 <= i < self._base_vocab_size]
+            if skip_special_tokens:
+                cleaned = [i for i in token_ids if i not in special and 0 <= i < self._base_vocab_size]
+            else:
+                cleaned = [i for i in token_ids if 0 <= i < self._base_vocab_size]
 
         return self._llama.decode(cleaned)
 
@@ -1121,9 +1172,13 @@ def get_tokenizer(config):
         model_path = config.data.get('tokenizer_model_path', 'tokenizer.model')
         if not os.path.isabs(model_path):
             model_path = hydra.utils.to_absolute_path(model_path)
+        vocab_map_path = config.data.get('tokenizer_vocab_map_path')
+        if vocab_map_path is not None and not os.path.isabs(vocab_map_path):
+            vocab_map_path = hydra.utils.to_absolute_path(vocab_map_path)
         tokenizer = LlamaReduced10KTokenizer(
             model_path=model_path,
-            reduced_vocab_size=config.data.get('vocab_size', 10002))
+            reduced_vocab_size=config.data.get('vocab_size', 10002),
+            vocab_map_path=vocab_map_path)
     else:
         tokenizer = transformers.AutoTokenizer.from_pretrained(
             config.data.tokenizer_name_or_path)
