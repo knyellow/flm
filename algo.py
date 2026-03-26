@@ -810,7 +810,13 @@ class FLMBase(trainer_base.TrainerBase):
     def _process_sigma(self, sigma):
         if sigma.ndim == 1:
             sigma = sigma.unsqueeze(-1)
-        assert sigma.ndim == 2
+
+        # modify assert -> pass
+        if sigma.ndim == 2 and sigma.shape[1] > 1:
+            if not self.config.algo.time_conditioning:
+                sigma = torch.zeros_like(sigma)
+            return sigma  # (B, L)
+
         sigma = sigma.mean(-1).squeeze()
         if sigma.ndim == 0:
             sigma = sigma.unsqueeze(0)
@@ -871,6 +877,7 @@ class FLMBase(trainer_base.TrainerBase):
         if accum_step is not None:
             batch_dim = n
             n = self.config.loader.global_batch_size
+
         _eps_t = torch.rand(n, device=self.device)
         if self.antithetic_sampling:
             offset = torch.arange(n, device=self.device) / n
@@ -883,7 +890,29 @@ class FLMBase(trainer_base.TrainerBase):
             t = t.chunk(self.trainer.num_devices)[self.trainer.local_rank]
             t = t.chunk(self.trainer.accumulate_grad_batches)[accum_step]
             t = t[:batch_dim]
+
         return t
+    
+    def _sample_tokenwise_t_interval(self, n, L, accum_step, t_min=None, t_max=None):
+        if t_min is None:
+            t_min = self.t_min
+        if t_max is None:
+            t_max = self.t_max
+        if accum_step is not None:
+            batch_dim = n
+            n = self.config.loader.global_batch_size
+
+        _eps_t = torch.rand(n, L, device=self.device) # [B, L] where L is seq len
+
+        t = (t_max - t_min) * _eps_t + t_min
+
+        if accum_step is not None:
+            t = t.chunk(self.trainer.num_nodes)[self.trainer.node_rank]
+            t = t.chunk(self.trainer.num_devices)[self.trainer.local_rank]
+            t = t.chunk(self.trainer.accumulate_grad_batches)[accum_step]
+            t = t[:batch_dim]
+
+        return t # [B, L]
 
     def _alpha_t_to_gamma(self, alpha_t):
         """Convert discrete time schedule alpha_t to continuous gamma_t."""
@@ -896,8 +925,16 @@ class FLMBase(trainer_base.TrainerBase):
 
     def corrupt_continuous(self, x0, t):
         """Corrupt data x0 at time t using linear interpolation with Gaussian noise."""
-        t = t.unsqueeze(-1).unsqueeze(-1)
-        target_data = F.one_hot(x0, self.vocab_size).float()
+        t = t.unsqueeze(-1).unsqueeze(-1) # [B, 1, 1]
+        target_data = F.one_hot(x0, self.vocab_size).float() # [B, L, V]
+        noise = torch.randn_like(target_data, dtype=torch.float32)
+        x_t = (1 - t) * noise + t * target_data
+        return x_t, target_data
+
+    def tokenwise_corrupt_continuous(self, x0, t):
+        """Corrupt data x0 at time t using linear interpolation with Gaussian noise."""
+        t = t.unsqueeze(-1) # [B, L] -> [B, L, 1]
+        target_data = F.one_hot(x0, self.vocab_size).float() # [B, L, V]
         noise = torch.randn_like(target_data, dtype=torch.float32)
         x_t = (1 - t) * noise + t * target_data
         return x_t, target_data
@@ -1054,11 +1091,12 @@ class FLM(FLMBase):
              current_accumulation_step=None, train_mode=False,
              xT=None, given_t=None, not_sampling_t=False):
         del given_t, not_sampling_t, output_tokens
-        B = x0.shape[0]
-        t = self._sample_t_interval(B, current_accumulation_step,
-                                    t_min=self.t_min, t_max=self.t_max)
-        c_t = self._alpha_t_to_gamma(t)
-        x_t, target_data = self.corrupt_continuous(x0, c_t)
+        B, L = x0.shape
+
+        t = self._sample_tokenwise_t_interval(B, L, current_accumulation_step,
+                                    t_min=self.t_min, t_max=self.t_max) # [B, L]
+        c_t = self._alpha_t_to_gamma(t) # [B, L]
+        x_t, target_data = self.tokenwise_corrupt_continuous(x0, c_t)
         f = self.forward(x_t, t)
         tfm_loss = -(target_data * f).sum(dim=-1)
 

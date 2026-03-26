@@ -653,6 +653,7 @@ class LlamaReduced10KTokenizer(transformers.PreTrainedTokenizer):
             cleaned = [i for i in token_ids if i not in special and 0 <= i < self._base_vocab_size]
         else:
             cleaned = [i for i in token_ids if 0 <= i < self._base_vocab_size]
+
         return self._llama.decode(cleaned)
 
     def batch_decode(self, sequences, **kwargs):
@@ -1014,8 +1015,11 @@ def get_dataset(dataset_name,
             return text
         return detok
 
-    EOS = tokenizer.encode(tokenizer.eos_token)[0]
-    BOS = tokenizer.encode(tokenizer.bos_token)[0]
+    # llama일때만 바꾸기
+    EOS = tokenizer.eos_token_id
+    BOS = tokenizer.bos_token_id
+    #EOS = tokenizer.encode(tokenizer.eos_token)[0]
+    #BOS = tokenizer.encode(tokenizer.bos_token)[0]
 
     def preprocess_and_tokenize(example):
         if dataset_name == 'ptb':
@@ -1070,6 +1074,11 @@ def get_dataset(dataset_name,
     elif dataset_name == 'ag_news':
         tokenized_dataset = tokenized_dataset.remove_columns(
             ['text', 'label'])
+    elif dataset_name in ('tinystories-train', 'tinystories-valid'):
+        cols_to_remove = [c for c in tokenized_dataset.column_names 
+                                if c != 'input_ids']
+        tokenized_dataset = tokenized_dataset.remove_columns(cols_to_remove)
+
     else:
         tokenized_dataset = tokenized_dataset.remove_columns(
             'text')
@@ -1108,8 +1117,12 @@ def get_tokenizer(config):
     elif config.data.tokenizer_name_or_path in ['alpha8', 'synthetic-alpha8']:
         tokenizer = Alpha8Tokenizer()
     elif config.data.tokenizer_name_or_path == 'llama-10k':
+        import hydra
+        model_path = config.data.get('tokenizer_model_path', 'tokenizer.model')
+        if not os.path.isabs(model_path):
+            model_path = hydra.utils.to_absolute_path(model_path)
         tokenizer = LlamaReduced10KTokenizer(
-            model_path=config.data.get('tokenizer_model_path', 'tokenizer.model'),
+            model_path=model_path,
             reduced_vocab_size=config.data.get('vocab_size', 10002))
     else:
         tokenizer = transformers.AutoTokenizer.from_pretrained(

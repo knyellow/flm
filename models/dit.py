@@ -246,13 +246,14 @@ class TimestepEmbedder(nn.Module):
             - math.log(max_period)
             * torch.arange(start=0, end=half, dtype=torch.float32, device=t.device)
             / half)
-        args = t[:, None].float() * freqs[None]
+        # modified to handle timestep
+        args = t[... , None].float() * freqs[None]
         embedding = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
         if dim % 2:
             embedding = torch.cat(
                 [embedding,
                  torch.zeros_like(embedding[:, :1])], dim=-1)
-        return embedding
+        return embedding # [B, L]
 
     def forward(self, t):
         t_freq = self.timestep_embedding(t, self.frequency_embedding_size)
@@ -446,8 +447,10 @@ class DDiTBlock(nn.Module):
         x = self.norm1(x)
 
         if self.adaLN:
-            (shift_msa, scale_msa, gate_msa, shift_mlp,
-             scale_mlp, gate_mlp) = self.adaLN_modulation(c)[:, None].chunk(6, dim=2)
+            c_mod = self.adaLN_modulation(c)
+            if c_mod.ndim == 2:
+                c_mod = c_mod[:, None]
+            (shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp) = c_mod.chunk(6, dim=2)
             x = modulate_fused(x, shift_msa, scale_msa)
         
         qkv = self.attn_qkv(x)
@@ -525,7 +528,10 @@ class DDiTFinalLayer(nn.Module):
     def forward(self, x, c):
         x = self.norm_final(x)
         if self.adaLN:
-            shift, scale = self.adaLN_modulation(c)[:, None].chunk(2, dim=2)
+            c_mod = self.adaLN_modulation(c)
+            if c_mod.ndim == 2:
+                c_mod = c_mod[:, None]
+            shift, scale = c_mod.chunk(2, dim=2)
             x = modulate_fused(x, shift, scale)
         x = self.linear(x)
         return x

@@ -4,6 +4,9 @@ __pycache__/
 *.pyo
 *.egg-info/
 
+# dataset(big storage)
+processed/
+
 # Hydra outputs
 outputs/
 

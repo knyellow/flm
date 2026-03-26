@@ -39,6 +39,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max_val_examples", type=int, default=2048)
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--vocab_size", type=int, default=10004)
+    parser.add_argument("--vocab_map", default=None,
+                        help="Path to vocab_map.json from build_vocab.py (frequency-based mode). "
+                             "If omitted, falls back to index-cutoff mode.")
     parser.add_argument("--dim", type=int, default=1024)
     parser.add_argument("--n_layers", type=int, default=2)
     parser.add_argument("--n_heads", type=int, default=16)
@@ -178,7 +181,11 @@ def main() -> None:
 
     device = torch.device(args.device)
     tokenizer = (
-        LlamaTokenizerWrapper(args.tokenizer_path, vocab_size=args.vocab_size)
+        LlamaTokenizerWrapper(
+            args.tokenizer_path,
+            vocab_size=args.vocab_size,
+            vocab_map_path=args.vocab_map,
+        )
         if args.tokenizer == "llama"
         else ByteTokenizer()
     )

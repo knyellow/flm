@@ -13,6 +13,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tokenizer", choices=["llama", "byte"], default="llama")
     parser.add_argument("--tokenizer_path", default="AR/tokenizer.model")
     parser.add_argument("--vocab_size", type=int, default=10004)
+    parser.add_argument("--vocab_map", default=None,
+                        help="Path to vocab_map.json from build_vocab.py (frequency-based mode).")
     parser.add_argument("--prompt", default="Once upon a time")
     parser.add_argument("--max_new_tokens", type=int, default=512)
     parser.add_argument("--min_new_tokens", type=int, default=128)
@@ -26,7 +28,11 @@ def main() -> None:
     args = parse_args()
     device = torch.device(args.device)
     tokenizer = (
-        LlamaTokenizerWrapper(args.tokenizer_path, vocab_size=args.vocab_size)
+        LlamaTokenizerWrapper(
+            args.tokenizer_path,
+            vocab_size=args.vocab_size,
+            vocab_map_path=args.vocab_map,
+        )
         if args.tokenizer == "llama"
         else ByteTokenizer()
     )
