@@ -14,8 +14,8 @@ from AR.llama.model import LlamaConfig, LlamaForCausalLM
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train a small Llama-style model on TinyStories.")
-    parser.add_argument("--train_path", default="processed/tinystories/train.jsonl")
-    parser.add_argument("--val_path", default="processed/tinystories/validation.jsonl")
+    parser.add_argument("--train_path", default="/app/data/processed/tinystories/train.jsonl")
+    parser.add_argument("--val_path", default="/app/data/processed/tinystories/validation.jsonl")
     parser.add_argument("--output_dir", default="AR/llama/outputs/tinystories-small")
     parser.add_argument("--tokenizer", choices=["llama", "byte"], default="llama")
     parser.add_argument("--tokenizer_path", default="AR/tokenizer.model")

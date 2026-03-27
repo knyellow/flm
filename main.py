@@ -11,6 +11,8 @@ import rich.syntax
 import rich.tree
 import torch
 torch.load = functools.partial(torch.load, weights_only=False)
+import torch._dynamo
+torch._dynamo.config.optimize_ddp = False
 from torch.distributed import init_process_group, destroy_process_group
 import wandb
 import algo

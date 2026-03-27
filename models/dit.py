@@ -459,7 +459,7 @@ class DDiTBlock(nn.Module):
             'b s (three h d) -> b s three h d',
             three=3,
             h=self.n_heads)
-        with torch.cuda.amp.autocast(enabled=False):
+        with torch.amp.autocast('cuda', enabled=False):
             cos, sin = rotary_cos_sin
             qkv = apply_rotary_pos_emb(
                 qkv, cos.to(qkv.dtype), sin.to(qkv.dtype)

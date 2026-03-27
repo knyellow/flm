@@ -104,7 +104,7 @@ wandb:
 
 hydra:
   run:
-    dir: ./outputs/${data.train}/latest
+    dir: ./outputs/${data.train}/${now:%Y.%m.%d}/${now:%H%M%S}
   job:
     chdir: true
 

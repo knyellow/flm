@@ -4,7 +4,7 @@ tokenizer_name_or_path: llama-10k
 tokenizer_model_path: tokenizer.model
 tokenizer_vocab_map_path: AR/llama/vocab_map.json
 vocab_size: 10004
-data_dir: processed/tinystories
+data_dir: /app/data/processed/tinystories
 cache_dir: ${kydra:runtime.cwd}/datasets/tinystories
 wrap: True
 streaming: False

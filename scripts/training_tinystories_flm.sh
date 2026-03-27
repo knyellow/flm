@@ -1,4 +1,4 @@
-DATA_DIR="/data1/knyellow/flm_cache/tinystories"
+DATA_DIR="/app/data/flm_cache/tinystories"
 
 python -u -m main \
   loader.global_batch_size=512 \
@@ -13,10 +13,10 @@ python -u -m main \
   model.length=512 \
   sampling.num_sample_batches=1 \
   sampling.solver=euler \
-  sampling.steps=[512] \
-  trainer.max_steps=10000 \
+  sampling.steps=[128] \
+  trainer.max_steps=1024 \
   trainer.precision=bf16 \
   optim.lr=3e-4 \
-  trainer.val_check_interval=1000 \
+  trainer.val_check_interval=150 \
   algo.double_temb=False \
-  callbacks.checkpoint_every_n_steps.every_n_train_steps=1000
+  callbacks.checkpoint_every_n_steps.every_n_train_steps=150

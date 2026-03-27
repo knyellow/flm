@@ -1,7 +1,6 @@
 torch>=2.3.0
 datasets==3.6.0
 einops==0.8.1
-flash-attn==2.5.8
 fsspec==2025.3.0
 huggingface_hub==0.27.1
 hf_transfer==0.1.9

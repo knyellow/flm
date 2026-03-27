@@ -1018,9 +1018,8 @@ def get_dataset(dataset_name,
         dataset = ReflowDataset(config)
         return dataset
     elif dataset_name in ('tinystories-train', 'tinystories-valid'):
-        # Load from local JSONL files in processed/tinystories/
         import hydra
-        data_dir = config.data.get('data_dir', 'processed/tinystories')
+        data_dir = config.data.get('data_dir', '/app/data/processed/tinystories')
         if not os.path.isabs(data_dir):
                 data_dir = hydra.utils.to_absolute_path(data_dir)
         data_files = {
