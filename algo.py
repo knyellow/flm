@@ -1108,21 +1108,17 @@ class FLM(FLMBase):
 
     @torch.no_grad()
     def generate_samples(self, num_samples, num_steps=None, eps=1e-5):
-        """Generate samples using Euler ODE solver."""
-        if num_steps is None:
-            num_steps = self.config.sampling.steps
-        B = num_samples
-        V = self.vocab_size
-        L = self.num_tokens
-        device = self.device
-
+        """Generate samples using Euler ODE solver.
+        
+        original code:
         t_vals = torch.linspace(0.0, 1.0, num_steps + 1, device=device)
+        t_vals = t_vals.unsqueeze(-1).expand(-1, L)  # [num_steps + 1, L]
         z = torch.randn((num_samples, L, V), device=device, dtype=self.dtype)
 
         for i in range(num_steps):
-            t_curr = t_vals[i]
-            t_next = t_vals[i + 1]
-            t_in = t_curr.expand(B)
+            t_curr = t_vals[i] # [1, L]
+            t_next = t_vals[i + 1] # [1, L]
+            t_in = t_curr.expand(B, -1) # [B, L]
             c_t_in = self._alpha_t_to_gamma(t_in)
             c_d_in = self._alpha_t_to_gamma(t_next.expand(B)) - c_t_in
             x_1_pred = self.forward(z, t_in)
@@ -1132,8 +1128,44 @@ class FLM(FLMBase):
                 z = x_1_pred_probs
                 break
 
-            v = (x_1_pred_probs - z) / (1.0 - c_t_in.view(-1, 1, 1) + 1e-5)
-            z = z + c_d_in.view(-1, 1, 1) * v
+            v = (x_1_pred_probs - z) / (1.0 - c_t_in.unsqueeze(-1) + 1e-5)
+            z = z + c_d_in.unsqueeze(-1) * 
+        """
+
+        if num_steps is None:
+            num_steps = self.config.sampling.steps
+            if isinstance(num_steps, (list, tuple)):
+                num_steps = int(num_steps[0])
+        B = num_samples
+        V = self.vocab_size
+        L = self.num_tokens
+        device = self.device
+
+        # New sampling: AR sytle
+        for pos in range(L):
+            for i in range(num_steps):
+                s = i / num_steps
+                s_next = (i + 1) / num_steps
+
+                t_curr = torch.zeros(L, device=device, dtype=torch.float32)
+                t_next = torch.zeros(L, device=device, dtype=torch.float32)
+                if pos > 0:
+                    t_curr[:pos] = 1.0
+                    t_next[:pos] = 1.0
+                t_curr[pos] = s
+                t_next[pos] = s_next
+
+                t_in = t_curr.unsqueeze(0).expand(B, -1) # [B, L]
+                t_next_in = t_next.unsqueeze(0).expand(B, -1) # [B, L]
+
+                c_t_in = self._alpha_t_to_gamma(t_in) 
+                c_d_in = self._alpha_t_to_gamma(t_next_in) - c_t_in
+
+                x_1_pred = self.forward(z, t_in)
+                x_1_pred_probs = x_1_pred.exp()
+
+                v = (x_1_pred_probs - z) / (1.0 - c_t_in.unsqueeze(-1) + eps)
+                z = z + c_d_in.unsqueeze(-1) * v # [B, L, V]
 
         return z.argmax(dim=-1)
 

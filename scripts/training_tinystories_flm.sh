@@ -1,9 +1,9 @@
-DATA_DIR="processed/tinystories"
+DATA_DIR="/data1/knyellow/flm_cache/tinystories"
 
 python -u -m main \
   loader.global_batch_size=512 \
-  loader.batch_size=8 \
-  loader.eval_batch_size=8 \
+  loader.batch_size=16 \
+  loader.eval_batch_size=16 \
   data=tinystories \
   data.cache_dir=$DATA_DIR \
   wandb.project=tinystories_flm \
